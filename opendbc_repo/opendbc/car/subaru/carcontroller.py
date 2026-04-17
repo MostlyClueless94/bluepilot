@@ -32,6 +32,15 @@ MADS_ONLY_FAULT_GUARD_ANGLE_MARGIN = 20.0  # deg below active cap before high-ra
 MADS_ONLY_FAULT_GUARD_REENABLE_MARGIN = 5.0  # deg below active cap before quiet countdown can run
 MADS_ONLY_FAULT_GUARD_REENABLE_UNWIND_FRAMES = 5  # steering command frames after quiet guard clears
 MADS_ONLY_FAULT_GUARD_REENABLE_UNWIND_STEP = 3.0  # deg/frame centerward clamp after quiet guard clears
+MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED = 11.0 * 0.44704  # m/s
+MAX_STEERING_LOW_SPEED_GUARD_EXIT_SPEED = 12.5 * 0.44704  # m/s
+MAX_STEERING_LOW_SPEED_GUARD_TARGET_ANGLE = 15.0  # deg
+MAX_STEERING_LOW_SPEED_GUARD_MEASURED_ANGLE = 30.0  # deg
+MAX_STEERING_LOW_SPEED_GUARD_RATE = 60.0  # deg/s
+MAX_STEERING_LOW_SPEED_GUARD_QUIET_TARGET_ANGLE = 10.0  # deg
+MAX_STEERING_LOW_SPEED_GUARD_QUIET_MEASURED_ANGLE = 10.0  # deg
+MAX_STEERING_LOW_SPEED_GUARD_QUIET_RATE = 60.0  # deg/s
+MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES = 10  # steering command frames (~200 ms with STEER_STEP=2)
 ANGLE_DRIVER_OVERRIDE_HOLD_FRAMES = 10  # steering command frames (~200 ms with STEER_STEP=2)
 ANGLE_DRIVER_OVERRIDE_RAMP_FRAMES = 36  # validated default reclaim ramp (steering command frames, ~720 ms with STEER_STEP=2)
 ANGLE_DRIVER_OVERRIDE_RAMP_SOFTNESS_MIN = 0
@@ -99,11 +108,14 @@ class CarController(CarControllerBase, SnGCarController):
     self.mc_subaru_mads_max_steering_angle = MADS_ONLY_MAX_STEER_ANGLE
     self.mc_subaru_unwind_rate_level = SUBARU_UNWIND_RATE_LEVEL_MIN
     self.mc_subaru_turn_in_rate_level = SUBARU_TURN_IN_RATE_LEVEL_MIN
+    self.mc_subaru_max_steering_experiment = False
     self.subaru_manual_yield_full_release_active = False
     self.subaru_effective_lkas_active = False
     self.mads_lkas_fault_guard_quiet_frames = 0
     self.mads_lkas_fault_guard_source = "none"
     self.mads_lkas_reenable_unwind_clamp_frames = 0
+    self.max_steering_low_speed_guard_active = False
+    self.max_steering_low_speed_guard_quiet_frames = 0
     self.angle_driver_override_hold_frames = 0
     self.angle_driver_override_ramp_frames = 0
     self.angle_driver_override_ramp_total_frames = ANGLE_DRIVER_OVERRIDE_RAMP_FRAMES
@@ -307,6 +319,47 @@ class CarController(CarControllerBase, SnGCarController):
     self.mads_lkas_reenable_unwind_clamp_frames -= 1
     return apply_steer, True, clamped
 
+  def _reset_max_steering_low_speed_guard(self) -> None:
+    self.max_steering_low_speed_guard_active = False
+    self.max_steering_low_speed_guard_quiet_frames = 0
+
+  def _update_max_steering_low_speed_guard(self, mads_only: bool, speed: float, target_angle: float,
+                                           measured_angle: float, steering_rate: float) -> tuple[bool, str]:
+    if not (self.mc_subaru_max_steering_experiment and mads_only):
+      self._reset_max_steering_low_speed_guard()
+      return False, "none"
+
+    if speed > MAX_STEERING_LOW_SPEED_GUARD_EXIT_SPEED:
+      self._reset_max_steering_low_speed_guard()
+      return False, "speed_exit"
+
+    turn_risk = (
+      abs(target_angle) >= MAX_STEERING_LOW_SPEED_GUARD_TARGET_ANGLE
+      or abs(measured_angle) >= MAX_STEERING_LOW_SPEED_GUARD_MEASURED_ANGLE
+      or abs(steering_rate) >= MAX_STEERING_LOW_SPEED_GUARD_RATE
+    )
+    if speed <= MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED and turn_risk:
+      self.max_steering_low_speed_guard_active = True
+      self.max_steering_low_speed_guard_quiet_frames = MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES
+      return True, "max_low_speed_turn"
+
+    if not self.max_steering_low_speed_guard_active:
+      return False, "none"
+
+    quiet_enough = (
+      abs(target_angle) < MAX_STEERING_LOW_SPEED_GUARD_QUIET_TARGET_ANGLE
+      and abs(measured_angle) < MAX_STEERING_LOW_SPEED_GUARD_QUIET_MEASURED_ANGLE
+      and abs(steering_rate) <= MAX_STEERING_LOW_SPEED_GUARD_QUIET_RATE
+    )
+    if quiet_enough:
+      self.max_steering_low_speed_guard_quiet_frames -= 1
+      if self.max_steering_low_speed_guard_quiet_frames <= 0:
+        self._reset_max_steering_low_speed_guard()
+    else:
+      self.max_steering_low_speed_guard_quiet_frames = MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES
+
+    return True, "max_low_speed_quiet"
+
   @staticmethod
   def _apply_mads_only_steer_target_cap(steer_target: float, mads_only: bool, lkas_request: bool,
                                         max_steer_angle: float) -> tuple[float, bool]:
@@ -387,6 +440,7 @@ class CarController(CarControllerBase, SnGCarController):
       SUBARU_TURN_IN_RATE_LEVEL_MIN,
       SUBARU_TURN_IN_RATE_LEVEL_MAX,
     ))
+    self.mc_subaru_max_steering_experiment = self._get_bool_param("MCSubaruMaxSteeringExperiment")
 
   def _reset_angle_driver_override_ramp(self):
     self.angle_driver_override_ramp_frames = 0
@@ -535,6 +589,8 @@ class CarController(CarControllerBase, SnGCarController):
     # Angle-LKAS can hard fault during very low-speed MADS lateral-only maneuvers.
     # Keep MADS behavior above 1 mph, but cap both measured angle and requested target in lateral-only mode.
     mads_only = CC.latActive and not CC.enabled
+    drive_allowed = CS.out.gearShifter == structs.CarState.GearShifter.drive and not CS.out.standstill
+    raw_steer_target = self._get_angle_lkas_target(CC.actuators.steeringAngleDeg)
     mads_only_selected_steer_angle = self._get_mads_only_max_steer_angle()
     mads_only_active_steer_angle = self._get_mads_only_active_steer_angle_cap(
       mads_only_selected_steer_angle,
@@ -549,13 +605,20 @@ class CarController(CarControllerBase, SnGCarController):
       mads_only_active_steer_angle,
       mads_angle_limited,
     )
+    max_steering_low_speed_guard_active, max_steering_low_speed_guard_reason = self._update_max_steering_low_speed_guard(
+      mads_only and drive_allowed,
+      CS.out.vEgoRaw,
+      raw_steer_target,
+      CS.out.steeringAngleDeg,
+      CS.out.steeringRateDeg,
+    )
     mads_only_ok = (
       CS.out.vEgoRaw > MADS_ONLY_MIN_SPEED
       and not mads_angle_limited
       and not mads_fault_guard_active
+      and not max_steering_low_speed_guard_active
     )
-    lkas_allowed = CC.latActive and (CC.enabled or not mads_only or mads_only_ok) and \
-      CS.out.gearShifter == structs.CarState.GearShifter.drive and not CS.out.standstill
+    lkas_allowed = CC.latActive and (CC.enabled or not mads_only or mads_only_ok) and drive_allowed
     effective_steering_pressed, manual_yield_threshold, soft_hold_threshold = self._update_angle_driver_override_soft_hold(
       CS.out.steeringPressed,
       lkas_allowed,
@@ -588,6 +651,8 @@ class CarController(CarControllerBase, SnGCarController):
       inhibit_reason = "mads_below_min_speed"
     elif mads_angle_limited:
       inhibit_reason = "mads_angle_limit"
+    elif mads_only and max_steering_low_speed_guard_active:
+      inhibit_reason = max_steering_low_speed_guard_reason
     elif mads_only and mads_fault_guard_active:
       inhibit_reason = mads_fault_guard_reason
     elif mads_only and not mads_only_ok:
@@ -631,7 +696,6 @@ class CarController(CarControllerBase, SnGCarController):
       ),
     )
 
-    raw_steer_target = self._get_angle_lkas_target(CC.actuators.steeringAngleDeg)
     steer_target = raw_steer_target
 
     if ramp_will_start:
@@ -677,6 +741,26 @@ class CarController(CarControllerBase, SnGCarController):
         + f"selectedCap={mads_only_selected_steer_angle:.2f} activeCap={mads_only_active_steer_angle:.2f} "
         + f"measuredAngle={CS.out.steeringAngleDeg:.2f} measuredRate={CS.out.steeringRateDeg:.2f} "
         + f"speed={CS.out.vEgoRaw:.2f} madsOnly={mads_only}"
+      ),
+    )
+    self._log_transition(
+      "max_steering_low_speed_guard",
+      (
+        self.mc_subaru_max_steering_experiment,
+        max_steering_low_speed_guard_active,
+        max_steering_low_speed_guard_reason,
+        self.max_steering_low_speed_guard_quiet_frames,
+        self.max_steering_low_speed_guard_active,
+        lkas_request,
+      ),
+      (
+        f"max steering low-speed guard max={self.mc_subaru_max_steering_experiment} "
+        + f"active={max_steering_low_speed_guard_active} reason={max_steering_low_speed_guard_reason} "
+        + f"quietFrames={self.max_steering_low_speed_guard_quiet_frames} "
+        + f"latched={self.max_steering_low_speed_guard_active} "
+        + f"target={raw_steer_target:.2f} measuredAngle={CS.out.steeringAngleDeg:.2f} "
+        + f"measuredRate={CS.out.steeringRateDeg:.2f} speed={CS.out.vEgoRaw:.2f} "
+        + f"madsOnly={mads_only} lkasRequest={lkas_request}"
       ),
     )
 
@@ -753,6 +837,7 @@ class CarController(CarControllerBase, SnGCarController):
         + f"madsOnly={mads_only} madsSelectedCap={mads_only_selected_steer_angle:.2f} "
         + f"madsActiveCap={mads_only_active_steer_angle:.2f} madsCapClamped={mads_cap_clamped} "
         + f"madsFaultGuardActive={mads_fault_guard_active} madsFaultGuardReason={mads_fault_guard_reason} "
+        + f"maxGuardActive={max_steering_low_speed_guard_active} maxGuardReason={max_steering_low_speed_guard_reason} "
         + f"measuredRate={CS.out.steeringRateDeg:.2f} "
         + f"handoffActive={handoff_active} rampActive={manual_override_ramp_active} "
         + f"manualYieldActive={manual_yield_active} steeringTorque={CS.out.steeringTorque:.2f} "

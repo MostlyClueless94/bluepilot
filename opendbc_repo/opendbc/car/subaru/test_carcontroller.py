@@ -18,6 +18,9 @@ from opendbc.car.subaru.carcontroller import (
   ANGLE_DRIVER_OVERRIDE_SOFT_HOLD_LEVEL_MAX,
   ANGLE_DRIVER_OVERRIDE_SOFT_HOLD_LEVEL_MIN,
   CarController,
+  MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED,
+  MAX_STEERING_LOW_SPEED_GUARD_EXIT_SPEED,
+  MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES,
   MADS_ONLY_FAULT_GUARD_HIGH_SPEED,
   MADS_ONLY_FAULT_GUARD_LOW_SPEED,
   MADS_ONLY_FAULT_GUARD_LOW_SPEED_CAP,
@@ -105,7 +108,8 @@ class TestSubaruCarController(unittest.TestCase):
                         release_guard_enabled=False, release_guard_level=2,
                         mads_tighter_turns_enabled=False, mads_max_steering_angle=180,
                         unwind_rate_level=0, turn_in_rate_level=0,
-                        soft_hold_level=0, torque_threshold_enabled=False, torque_threshold=80):
+                        soft_hold_level=0, torque_threshold_enabled=False, torque_threshold=80,
+                        max_steering_experiment=False):
     self.params.put_bool("MCSubaruSoftCaptureEnabled", soft_capture_enabled)
     self.params.put("MCSubaruSoftCaptureLevel", str(soft_capture_level))
     self.params.put_bool("MCSubaruManualYieldResumeSoftnessEnabled", resume_softness_enabled)
@@ -118,6 +122,7 @@ class TestSubaruCarController(unittest.TestCase):
     self.params.put("MCSubaruMadsMaxSteeringAngle", str(mads_max_steering_angle))
     self.params.put("MCSubaruUnwindRateLevel", str(unwind_rate_level))
     self.params.put("MCSubaruTurnInRateLevel", str(turn_in_rate_level))
+    self.params.put_bool("MCSubaruMaxSteeringExperiment", max_steering_experiment)
     if resume_softness_setting is not None:
       self.params.put("MCSubaruManualYieldResumeSoftness", str(resume_softness_setting))
     CP = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023)
@@ -1053,6 +1058,161 @@ class TestSubaruCarController(unittest.TestCase):
     msg = controller.handle_angle_lateral(cc, quiet_cs)
     inhibited = subarucan.create_steering_control_angle(controller.packer, quiet_cs.out.steeringAngleDeg, False)
     self.assertNotEqual(msg, inhibited)
+
+  def test_max_steering_low_speed_guard_inhibits_turn_entry_without_manual_yield(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      turn_in_rate_level=20,
+      unwind_rate_level=20,
+      torque_threshold_enabled=True,
+      torque_threshold=500,
+      max_steering_experiment=True,
+    )
+    cs = self._build_cs(
+      8.5 * 0.44704,
+      -1.1,
+      steering_pressed=False,
+      steering_rate_deg=-6.5,
+      steering_torque=7.0,
+    )
+    cc = self._build_cc(True, False, -19.1)
+    controller.apply_angle_last = cs.out.steeringAngleDeg
+
+    msg = controller.handle_angle_lateral(cc, cs)
+    expected = subarucan.create_steering_control_angle(controller.packer, cs.out.steeringAngleDeg, False)
+
+    self.assertEqual(msg, expected)
+    self.assertTrue(controller.max_steering_low_speed_guard_active)
+    self.assertEqual(controller.max_steering_low_speed_guard_quiet_frames, MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES)
+    self.assertEqual(controller.mc_subaru_manual_yield_torque_threshold, 500)
+    self.assertFalse(controller.subaru_manual_yield_full_release_active)
+
+  def test_max_steering_low_speed_guard_latches_high_angle_and_rate_shapes(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      max_steering_experiment=True,
+    )
+    cc = self._build_cc(True, False, 6.0)
+    high_angle_cs = self._build_cs(9.0 * 0.44704, 57.4, steering_rate_deg=12.0)
+    high_rate_cs = self._build_cs(9.5 * 0.44704, 6.0, steering_rate_deg=75.0)
+    controller.apply_angle_last = high_angle_cs.out.steeringAngleDeg
+
+    high_angle_msg = controller.handle_angle_lateral(cc, high_angle_cs)
+    high_angle_expected = subarucan.create_steering_control_angle(controller.packer, high_angle_cs.out.steeringAngleDeg, False)
+    self.assertEqual(high_angle_msg, high_angle_expected)
+    self.assertTrue(controller.max_steering_low_speed_guard_active)
+
+    high_rate_msg = controller.handle_angle_lateral(cc, high_rate_cs)
+    high_rate_expected = subarucan.create_steering_control_angle(controller.packer, high_rate_cs.out.steeringAngleDeg, False)
+    self.assertEqual(high_rate_msg, high_rate_expected)
+    self.assertTrue(controller.max_steering_low_speed_guard_active)
+
+  def test_max_steering_low_speed_guard_keeps_max_available_above_exit_speed(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      turn_in_rate_level=20,
+      unwind_rate_level=20,
+      max_steering_experiment=True,
+    )
+    cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_EXIT_SPEED + 0.2, 40.0, steering_rate_deg=80.0)
+    cc = self._build_cc(True, False, 160.0)
+    controller.apply_angle_last = cs.out.steeringAngleDeg
+
+    msg = controller.handle_angle_lateral(cc, cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, cs.out.steeringAngleDeg, False)
+
+    self.assertNotEqual(msg, inhibited)
+    self.assertFalse(controller.max_steering_low_speed_guard_active)
+    self.assertGreater(controller.apply_angle_last, cs.out.steeringAngleDeg)
+
+  def test_max_steering_low_speed_guard_ignores_straight_low_speed_crawl(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      max_steering_experiment=True,
+    )
+    cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED - 0.2, 5.0, steering_rate_deg=0.0)
+    cc = self._build_cc(True, False, 5.0)
+    controller.apply_angle_last = cs.out.steeringAngleDeg
+
+    msg = controller.handle_angle_lateral(cc, cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, cs.out.steeringAngleDeg, False)
+
+    self.assertNotEqual(msg, inhibited)
+    self.assertFalse(controller.max_steering_low_speed_guard_active)
+
+  def test_max_steering_low_speed_guard_reenables_after_quiet_window_or_speed_exit(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      max_steering_experiment=True,
+    )
+    risky_cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED - 0.2, 32.0, steering_rate_deg=10.0)
+    quiet_cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED - 0.2, 0.0, steering_rate_deg=0.0)
+    speed_exit_cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_EXIT_SPEED + 0.2, 40.0, steering_rate_deg=80.0)
+    cc = self._build_cc(True, False, 0.0)
+    controller.apply_angle_last = risky_cs.out.steeringAngleDeg
+
+    controller.handle_angle_lateral(cc, risky_cs)
+    self.assertTrue(controller.max_steering_low_speed_guard_active)
+
+    for expected_frames in range(MAX_STEERING_LOW_SPEED_GUARD_QUIET_FRAMES - 1, -1, -1):
+      msg = controller.handle_angle_lateral(cc, quiet_cs)
+      expected = subarucan.create_steering_control_angle(controller.packer, quiet_cs.out.steeringAngleDeg, False)
+      self.assertEqual(msg, expected)
+      self.assertEqual(controller.max_steering_low_speed_guard_quiet_frames, expected_frames)
+
+    msg = controller.handle_angle_lateral(cc, quiet_cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, quiet_cs.out.steeringAngleDeg, False)
+    self.assertNotEqual(msg, inhibited)
+
+    controller.handle_angle_lateral(cc, risky_cs)
+    self.assertTrue(controller.max_steering_low_speed_guard_active)
+    msg = controller.handle_angle_lateral(cc, speed_exit_cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, speed_exit_cs.out.steeringAngleDeg, False)
+    self.assertNotEqual(msg, inhibited)
+    self.assertFalse(controller.max_steering_low_speed_guard_active)
+
+  def test_max_steering_low_speed_guard_off_preserves_non_max_behavior(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      turn_in_rate_level=20,
+      unwind_rate_level=20,
+      torque_threshold_enabled=True,
+      torque_threshold=500,
+      max_steering_experiment=False,
+    )
+    cs = self._build_cs(8.5 * 0.44704, -1.1, steering_pressed=False, steering_rate_deg=-6.5)
+    cc = self._build_cc(True, False, -19.1)
+    controller.apply_angle_last = cs.out.steeringAngleDeg
+
+    msg = controller.handle_angle_lateral(cc, cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, cs.out.steeringAngleDeg, False)
+
+    self.assertNotEqual(msg, inhibited)
+    self.assertFalse(controller.max_steering_low_speed_guard_active)
+
+  def test_max_steering_low_speed_guard_ignored_during_full_engaged_lateral(self):
+    controller = self._build_controller(
+      mads_tighter_turns_enabled=True,
+      mads_max_steering_angle=199,
+      turn_in_rate_level=20,
+      unwind_rate_level=20,
+      max_steering_experiment=True,
+    )
+    cs = self._build_cs(MAX_STEERING_LOW_SPEED_GUARD_ENTER_SPEED - 0.2, 57.4, steering_rate_deg=75.0)
+    cc = self._build_cc(True, True, 120.0)
+    controller.apply_angle_last = cs.out.steeringAngleDeg
+
+    msg = controller.handle_angle_lateral(cc, cs)
+    inhibited = subarucan.create_steering_control_angle(controller.packer, cs.out.steeringAngleDeg, False)
+
+    self.assertNotEqual(msg, inhibited)
+    self.assertFalse(controller.max_steering_low_speed_guard_active)
 
   def test_mads_only_angle_limit_latches_fault_guard_before_reenable(self):
     controller = self._build_controller(

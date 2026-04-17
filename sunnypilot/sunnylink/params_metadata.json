@@ -344,7 +344,7 @@
   },
   "MCSubaruMaxSteeringExperiment": {
     "title": "MAX Steering Experiment",
-    "description": "Experimental controlled-test preset for maximum Subaru MADS-only steering capability. Turning it on sets MADS steering angle cap to 199, turn-in rate to L20 500 deg/s, unwind rate to L20 500 deg/s, and manual yield torque threshold to 500. Turning it off directly restores the default steering test values: MADS angle cap off/default, turn-in and unwind back to stock, and custom yield torque off while keeping your saved torque threshold value. This may produce LKAS faults and should not be used outside controlled environments."
+    "description": "Experimental controlled-test preset for maximum Subaru MADS-only steering capability. Turning it on sets MADS steering angle cap to 199, turn-in rate to L20 500 deg/s, unwind rate to L20 500 deg/s, and manual yield torque threshold to 500. MAX keeps the highest steering test settings and greatly reduces normal manual-yield behavior. Turning it off directly restores the default steering test values: MADS angle cap off/default, turn-in and unwind back to stock, and custom yield torque off while keeping your saved torque threshold value. This may produce LKAS faults and should not be used outside controlled environments. At very low speeds MAX may intentionally drop LKAS request to avoid Subaru LKAS faults."
   },
   "MCSubaruMatchVehicleSpeedometer": {
     "title": "Match Vehicle Speedometer",

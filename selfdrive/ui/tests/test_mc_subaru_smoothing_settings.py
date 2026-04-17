@@ -135,6 +135,8 @@ def test_params_metadata_describes_subaru_lateral_menu_rework():
   assert 'MADS steering angle cap to 199' in source
   assert 'Turning it off directly restores the default steering test values' in source
   assert 'keeping your saved torque threshold value' in source
+  assert 'greatly reduces normal manual-yield behavior' in source
+  assert 'intentionally drop LKAS request' in source
   assert '180 deg is the default turning request limit' in source
   assert 'turn-in rate to L20 500 deg/s' in source
   assert 'unwind rate to L20 500 deg/s' in source

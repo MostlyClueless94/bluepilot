@@ -98,6 +98,8 @@ def test_tici_mc_custom_subaru_lateral_menu_matches_requested_controls():
   assert 'Turning this off directly restores the default steering' in source
   assert 'keeping your saved torque threshold value' in source
   assert 'Controlled testing only' in source
+  assert 'greatly reduces normal manual-yield behavior' in source
+  assert 'intentionally drop LKAS request' in source
 
   assert 'param="MCSubaruManualYieldFilteredDetectionEnabled"' not in source
   assert '"Filtered Yield Detection"' not in source
@@ -229,6 +231,8 @@ def test_subaru_params_and_metadata_match_lateral_menu_rework():
   assert '"title": "MAX Steering Experiment"' in metadata_source
   assert 'Turning it off directly restores the default steering test values' in metadata_source
   assert 'keeping your saved torque threshold value' in metadata_source
+  assert 'greatly reduces normal manual-yield behavior' in metadata_source
+  assert 'intentionally drop LKAS request' in metadata_source
   assert '"MCSubaruManualSteeringSoftHoldLevel"' in metadata_source
   assert '"title": "Manual Steering Hold"' in metadata_source
   assert '"label": "L1 Light"' in metadata_source

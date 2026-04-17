@@ -85,10 +85,11 @@ MATCH_VEHICLE_SPEEDOMETER_DESC = (
   + "Turn it off to show true wheel-speed-based speed instead."
 )
 MAX_STEERING_EXPERIMENT_DESC = (
-  "Apply the maximum Subaru MADS-only steering test preset. Turning this off directly restores the default steering "
+  "Apply the maximum Subaru MADS-only steering test preset. MAX keeps the highest steering test settings and greatly reduces normal manual-yield behavior "
+  + "by setting the manual-yield threshold to 500. Turning this off directly restores the default steering "
   + "test values: MADS angle cap off/default, turn-in and unwind back to stock, and custom yield torque off while "
-  + "keeping your saved torque threshold value."
-  + " Controlled testing only; this can still produce LKAS faults if used carelessly."
+  + "keeping your saved torque threshold value. Controlled testing only; this can still produce LKAS "
+  + "faults if used carelessly, and at very low speeds it may intentionally drop LKAS request to avoid Subaru LKAS faults."
 )
 MANUAL_YIELD_TORQUE_THRESHOLD_MIN = 40
 MANUAL_YIELD_TORQUE_THRESHOLD_STEP = 5
