@@ -90,15 +90,19 @@ def test_mc_custom_preserves_lateral_menu_hierarchy_and_simple_max_toggle_logic(
 
   assert 'def _enable_max_steering_experiment(self) -> None:' in source
   assert 'def _disable_max_steering_experiment(self) -> None:' in source
+  assert 'MAX_STEERING_EXPERIMENT_PARAM_TYPES' in source
   assert 'MAX_STEERING_EXPERIMENT_DEFAULTS' in source
   assert 'MAX_STEERING_EXPERIMENT_SNAPSHOT' not in source
   assert 'ConfirmDialog(' not in source
+  assert '"MCSubaruManualYieldTorqueThreshold": "int"' in source
   assert '"MCSubaruMadsTighterTurnsEnabled": True' in source
   assert '"MCSubaruMadsMaxSteeringAngle": 199' in source
   assert '"MCSubaruTurnInRateLevel": 20' in source
   assert '"MCSubaruUnwindRateLevel": 20' in source
   assert '"MCSubaruManualYieldTorqueThreshold": 500' in source
   assert '"MCSubaruManualYieldTorqueThreshold": ("int", 80)' not in source
+  assert 'self._params.put(key, value)' in source
+  assert 'self._params.put(key, str(value))' not in source
 
 
 def test_params_keys_register_subaru_lateral_menu_rework_defaults():

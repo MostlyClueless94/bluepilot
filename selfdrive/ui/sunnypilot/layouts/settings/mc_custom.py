@@ -99,12 +99,20 @@ MANUAL_YIELD_TORQUE_THRESHOLD_VALUES = (
   *range(200, MANUAL_YIELD_TORQUE_THRESHOLD_MAX + 50, 50),
 )
 MANUAL_YIELD_TORQUE_THRESHOLD_VALUE_MAP = {idx: value for idx, value in enumerate(MANUAL_YIELD_TORQUE_THRESHOLD_VALUES)}
+MAX_STEERING_EXPERIMENT_PARAM_TYPES = {
+  "MCSubaruMadsTighterTurnsEnabled": "bool",
+  "MCSubaruMadsMaxSteeringAngle": "int",
+  "MCSubaruTurnInRateLevel": "int",
+  "MCSubaruUnwindRateLevel": "int",
+  "MCSubaruManualYieldTorqueThresholdEnabled": "bool",
+  "MCSubaruManualYieldTorqueThreshold": "int",
+}
 MAX_STEERING_EXPERIMENT_DEFAULTS = {
-  "MCSubaruMadsTighterTurnsEnabled": ("bool", False),
-  "MCSubaruMadsMaxSteeringAngle": ("int", 180),
-  "MCSubaruTurnInRateLevel": ("int", 0),
-  "MCSubaruUnwindRateLevel": ("int", 0),
-  "MCSubaruManualYieldTorqueThresholdEnabled": ("bool", False),
+  "MCSubaruMadsTighterTurnsEnabled": False,
+  "MCSubaruMadsMaxSteeringAngle": 180,
+  "MCSubaruTurnInRateLevel": 0,
+  "MCSubaruUnwindRateLevel": 0,
+  "MCSubaruManualYieldTorqueThresholdEnabled": False,
 }
 MAX_STEERING_EXPERIMENT_VALUES = {
   "MCSubaruMadsTighterTurnsEnabled": True,
@@ -329,23 +337,23 @@ class MCCustomLayout(Widget):
     return tr(SOFT_CAPTURE_STRENGTH_LABELS[idx])
 
   def _put_max_steering_experiment_values(self, values: dict) -> None:
-    for key, (kind, default) in MAX_STEERING_EXPERIMENT_DEFAULTS.items():
-      value = values.get(key, default)
+    for key, value in values.items():
+      kind = MAX_STEERING_EXPERIMENT_PARAM_TYPES.get(key)
       if kind == "bool":
         self._params.put_bool(key, bool(value))
-      else:
+      elif kind == "int":
         try:
           value = int(value)
         except (TypeError, ValueError):
-          value = int(default)
-        self._params.put(key, str(value))
+          value = int(MAX_STEERING_EXPERIMENT_DEFAULTS.get(key, 0))
+        self._params.put(key, value)
 
   def _enable_max_steering_experiment(self) -> None:
     self._put_max_steering_experiment_values(MAX_STEERING_EXPERIMENT_VALUES)
     self._params.put_bool("MCSubaruMaxSteeringExperiment", True)
 
   def _disable_max_steering_experiment(self) -> None:
-    self._put_max_steering_experiment_values({})
+    self._put_max_steering_experiment_values(MAX_STEERING_EXPERIMENT_DEFAULTS)
     self._params.put_bool("MCSubaruMaxSteeringExperiment", False)
 
   def _on_max_steering_experiment_toggled(self, enabled: bool) -> None:

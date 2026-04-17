@@ -82,8 +82,10 @@ def test_tici_mc_custom_subaru_lateral_menu_matches_requested_controls():
   assert '"MCSubaruMaxSteeringExperiment"' in source
   assert 'param="MCSubaruMaxSteeringExperiment"' in source
   assert "ConfirmDialog(" not in source
+  assert "MAX_STEERING_EXPERIMENT_PARAM_TYPES" in source
   assert "MAX_STEERING_EXPERIMENT_DEFAULTS" in source
   assert "MAX_STEERING_EXPERIMENT_VALUES" in source
+  assert '"MCSubaruManualYieldTorqueThreshold": "int"' in source
   assert '"MCSubaruMadsTighterTurnsEnabled": True' in source
   assert '"MCSubaruMadsMaxSteeringAngle": 199' in source
   assert '"MCSubaruTurnInRateLevel": 20' in source
@@ -91,6 +93,8 @@ def test_tici_mc_custom_subaru_lateral_menu_matches_requested_controls():
   assert '"MCSubaruManualYieldTorqueThresholdEnabled": True' in source
   assert '"MCSubaruManualYieldTorqueThreshold": 500' in source
   assert '"MCSubaruManualYieldTorqueThreshold": ("int", 80)' not in source
+  assert "self._params.put(key, value)" in source
+  assert "self._params.put(key, str(value))" not in source
   assert 'Turning this off directly restores the default steering' in source
   assert 'keeping your saved torque threshold value' in source
   assert 'Controlled testing only' in source
@@ -158,12 +162,16 @@ def test_mici_subaru_layout_exact_lateral_menu_and_max_experiment():
   assert '"MAX steering\\nexperiment"' in source
   assert 'BigConfirmationDialogV2(' not in source
   assert 'slide to enable' not in source
+  assert 'MAX_STEERING_EXPERIMENT_PARAM_TYPES' in source
   assert 'MAX_STEERING_EXPERIMENT_DEFAULTS' in source
+  assert '"MCSubaruManualYieldTorqueThreshold": "int"' in source
   assert '"MCSubaruManualYieldTorqueThreshold": ("int", 80)' not in source
   assert '"MCSubaruMadsMaxSteeringAngle": 199' in source
   assert '"MCSubaruTurnInRateLevel": 20' in source
   assert '"MCSubaruUnwindRateLevel": 20' in source
   assert '"MCSubaruManualYieldTorqueThreshold": 500' in source
+  assert 'ui_state.params.put(key, value)' in source
+  assert 'ui_state.params.put(key, str(value))' not in source
 
   assert 'BigParamControl("filtered yield\\ndetection", "MCSubaruManualYieldFilteredDetectionEnabled")' not in source
   assert 'BigParamControl("advanced\\ntuning", "MCSubaruAdvancedTuning")' not in source
