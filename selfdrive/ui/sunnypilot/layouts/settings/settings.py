@@ -28,6 +28,7 @@ from openpilot.selfdrive.ui.sunnypilot.layouts.settings.visuals import VisualsLa
 # BluePilot: START - BP settings tab imports
 from openpilot.selfdrive.ui.bp.layouts.settings.bluepilot import BluePilotLayout
 from openpilot.selfdrive.ui.bp.layouts.settings.bp_web_panel import BPWebPanel
+from openpilot.selfdrive.ui.bp.layouts.settings.vehicle_bp import VehicleLayoutBP as VehicleLayout  # noqa: F811
 # BluePilot: END - BP settings tab imports
 from openpilot.system.ui.lib.application import gui_app, MousePos
 from openpilot.system.ui.lib.multilang import tr_noop

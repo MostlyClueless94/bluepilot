@@ -15,7 +15,6 @@ from openpilot.system.ui.lib.wifi_manager import WifiManager, Network
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.selfdrive.ui.bp.mici.widgets.preferred_network_select import PreferredNetworkSelectMici
-from bluepilot.params.vehicle_profiles import reset_active_profile, snapshot_active_profile
 
 class BluePilotLayoutMici(NavWidget):
   def __init__(self, back_callback: Callable):
@@ -37,25 +36,6 @@ class BluePilotLayoutMici(NavWidget):
       "icons_mici/settings/network/wifi_strength_full.png"
     )
     self.preferred_network_btn.set_click_callback(self._select_preferred_network)
-
-    self.vehicle_profile_status = BigButtonBP(
-      tr("vehicle profile"),
-      "",
-      "icons_mici/settings/device/info.png",
-      value_size=24
-    )
-    self.vehicle_profile_relearn = BigButtonBP(
-      tr("relearn current profile"),
-      "",
-      "icons_mici/settings/device/info.png"
-    )
-    self.vehicle_profile_relearn.set_click_callback(self._relearn_vehicle_profile)
-    self.vehicle_profile_reset = BigButtonBP(
-      tr("reset current profile"),
-      "",
-      "icons_mici/settings/device/reboot.png"
-    )
-    self.vehicle_profile_reset.set_click_callback(self._reset_vehicle_profile)
 
     # ******** Main Scroller ********
     self.enable_web_routes = BigParamControlBP("enable web routes server", "EnableWebRoutesServer")
@@ -113,9 +93,6 @@ class BluePilotLayoutMici(NavWidget):
       self.enable_web_routes,
       self.show_web_routes_qr,
       self.preferred_network_btn,
-      self.vehicle_profile_status,
-      self.vehicle_profile_relearn,
-      self.vehicle_profile_reset,
       self.show_hands_free_ui,
       self.show_lead_vehicle,
       self.show_brake_status,
@@ -182,7 +159,6 @@ class BluePilotLayoutMici(NavWidget):
     # Enable WiFi scanning when BluePilot menu is shown
     self._wifi_manager.set_active(True)
     self.preferred_network_btn.set_value(self._get_preferred_network_display())
-    self._update_vehicle_profile_controls()
 
   def hide_event(self):
     super().hide_event()
@@ -264,69 +240,6 @@ class BluePilotLayoutMici(NavWidget):
     # Preferred WiFi Network: enable when saved networks exist, refresh display value
     self.preferred_network_btn.set_enabled(len(self._saved_networks) > 0)
     self.preferred_network_btn.set_value(self._get_preferred_network_display())
-    self._update_vehicle_profile_controls()
-
-  def _get_vehicle_profile_value(self) -> str:
-    try:
-      active = self._params.get("BPVehicleProfileActive") or ""
-    except Exception:
-      active = ""
-    if isinstance(active, bytes):
-      active = active.decode("utf-8", errors="replace")
-    active = str(active)
-    return active if active else tr("none")
-
-  def _get_vehicle_profile_description(self) -> str:
-    try:
-      status = self._params.get("BPVehicleProfileStatus") or {}
-    except Exception:
-      status = {}
-    if not isinstance(status, dict):
-      return tr("waiting")
-    if status.get("restartRequired"):
-      return tr("restart required")
-    if status.get("modelFallback"):
-      return tr("default model used")
-    action = str(status.get("action") or "").lower()
-    changed = status.get("changed")
-    if changed:
-      return f"{action}: {changed} changed"
-    return action or tr("ready")
-
-  def _update_vehicle_profile_controls(self):
-    try:
-      active = bool(self._params.get("BPVehicleProfileActive"))
-    except Exception:
-      active = False
-    self.vehicle_profile_status.set_value(f"{self._get_vehicle_profile_value()} / {self._get_vehicle_profile_description()}")
-    self.vehicle_profile_relearn.set_enabled(active)
-    self.vehicle_profile_reset.set_enabled(active)
-
-  def _relearn_vehicle_profile(self):
-    def handle_confirm(result: DialogResult):
-      if result == DialogResult.CONFIRM:
-        snapshot_active_profile(self._params)
-        self._update_vehicle_profile_controls()
-        cloudlog.info("BluePilot MICI: relearned active vehicle profile")
-
-    gui_app.push_widget(ConfirmDialog(
-      tr("Save current model and settings into this vehicle profile?"),
-      tr("Relearn Profile"),
-      callback=handle_confirm
-    ))
-
-  def _reset_vehicle_profile(self):
-    def handle_confirm(result: DialogResult):
-      if result == DialogResult.CONFIRM:
-        reset_active_profile(self._params)
-        self._update_vehicle_profile_controls()
-        cloudlog.info("BluePilot MICI: reset active vehicle profile")
-
-    gui_app.push_widget(ConfirmDialog(
-      tr("Forget this vehicle profile so it can be learned again?"),
-      tr("Reset Profile"),
-      callback=handle_confirm
-    ))
 
   def _on_network_updated(self, networks: list[Network]):
     """Update saved networks list when WiFi networks are updated (callback from WifiManager)."""
