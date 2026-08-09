@@ -24,10 +24,12 @@
 #define MSG_SUBARU_CruiseControl         0x240U
 #define MSG_SUBARU_Throttle              0x40U
 #define MSG_SUBARU_Steering_Torque       0x119U
+#define MSG_SUBARU_Steering_2            0x11aU
 #define MSG_SUBARU_Wheel_Speeds          0x13aU
 #define MSG_SUBARU_Brake_Pedal           0x139U
 
 #define MSG_SUBARU_ES_LKAS               0x122U
+#define MSG_SUBARU_ES_LKAS_ANGLE         0x124U
 #define MSG_SUBARU_ES_Brake              0x220U
 #define MSG_SUBARU_ES_Distance           0x221U
 #define MSG_SUBARU_ES_Status             0x222U
@@ -77,8 +79,24 @@
   {.msg = {{MSG_SUBARU_CruiseControl,   alt_bus,         8, 20U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{MSG_SUBARU_ES_LKAS_State,   SUBARU_CAM_BUS,  8, 10U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
+// BluePilot: angle-LKAS uses measured steering and EyeSight status while retaining
+// the SunnyPilot camera signals used by MADS.
+#define SUBARU_LKAS_ANGLE_RX_CHECKS(alt_bus)                                                                                                    \
+  {.msg = {{MSG_SUBARU_Throttle,        SUBARU_MAIN_BUS, 8, 100U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_Steering_Torque, SUBARU_MAIN_BUS, 8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_Wheel_Speeds,    alt_bus,         8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_Brake_Status,    alt_bus,         8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_ES_Status,       alt_bus,         8, 20U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_ES_DashStatus,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_ES_LKAS_State,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{MSG_SUBARU_Steering_2,      SUBARU_MAIN_BUS, 8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+// End BluePilot
+
 static bool subaru_gen2 = false;
 static bool subaru_longitudinal = false;
+// BluePilot: select angle-LKAS safety semantics.
+static bool subaru_lkas_angle = false;
+// End BluePilot
 
 static uint32_t subaru_get_checksum(const CANPacket_t *msg) {
   return (uint8_t)msg->data[0];
@@ -107,6 +125,14 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     update_sample(&torque_driver, torque_driver_new);
   }
 
+  // BluePilot: 17-bit signed steering measurement for angle-LKAS safety.
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_Steering_2) && (msg->bus == SUBARU_MAIN_BUS)) {
+    int angle_meas_new = GET_BYTES(msg, 3, 3) & 0x1FFFFU;
+    angle_meas_new = -1 * to_signed(angle_meas_new, 17);
+    update_sample(&angle_meas, angle_meas_new);
+  }
+  // End BluePilot
+
   if ((msg->addr == MSG_SUBARU_ES_LKAS_State) && (msg->bus == SUBARU_CAM_BUS)) {
     int lkas_hud = (msg->data[2] & 0x0CU) >> 2U;
     if ((lkas_hud >= 1) && (lkas_hud <= 3)) {
@@ -114,8 +140,19 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // BluePilot: ES_Status is the authoritative engaged state on angle-LKAS cars;
+  // ES_DashStatus retains the ACC-main state needed by SunnyPilot MADS.
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_ES_Status) && (msg->bus == alt_main_bus)) {
+    bool cruise_engaged = (msg->data[3] >> 5) & 1U;
+    pcm_cruise_check(cruise_engaged);
+  }
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
+    acc_main_on = GET_BIT(msg, 49U);
+  }
+  // End BluePilot
+
   // enter controls on rising edge of ACC, exit controls on ACC off
-  if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
+  if (!subaru_lkas_angle && (msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
     bool cruise_engaged = (msg->data[5] >> 1) & 1U;
     pcm_cruise_check(cruise_engaged);
     acc_main_on = GET_BIT(msg, 40U);
@@ -142,6 +179,44 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
   }
 }
 
+// BluePilot: wrap the shared VM checks with the limits declared by the Subaru
+// controller. Jacob's July donor declared 190 deg and 5 deg/message but its
+// generic Panda check did not enforce either bound at low speed.
+static bool subaru_angle_cmd_checks(const int desired_angle, const bool lkas_request) {
+  const AngleSteeringLimits SUBARU_ANGLE_STEERING_LIMITS = {
+    .max_angle = 190 * 100,
+    .angle_deg_to_can = 100.0F,
+    .frequency = 50U,
+  };
+
+  // Based on the Ascent, which has the most restrictive Subaru slip factor.
+  const AngleSteeringParams SUBARU_ANGLE_STEERING_PARAMS = {
+    .slip_factor = -0.000580374471400815F,
+    .steer_ratio = 13.5F,
+    .wheelbase = 2.89F,
+  };
+
+  const int desired_angle_prev = desired_angle_last;
+  bool violation = safety_max_limit_check(desired_angle, SUBARU_ANGLE_STEERING_LIMITS.max_angle,
+                                          -SUBARU_ANGLE_STEERING_LIMITS.max_angle);
+
+  if ((controls_allowed || controls_allowed_lateral) && lkas_request) {
+    const int max_angle_delta = 5 * 100;
+    violation |= safety_max_limit_check(desired_angle, desired_angle_prev + max_angle_delta,
+                                        desired_angle_prev - max_angle_delta);
+  }
+
+  violation |= steer_angle_cmd_checks_vm(desired_angle, lkas_request, SUBARU_ANGLE_STEERING_LIMITS,
+                                         SUBARU_ANGLE_STEERING_PARAMS);
+
+  if (violation) {
+    desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -SUBARU_ANGLE_STEERING_LIMITS.max_angle,
+                                     SUBARU_ANGLE_STEERING_LIMITS.max_angle);
+  }
+  return violation;
+}
+// End BluePilot
+
 static bool subaru_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits SUBARU_STEERING_LIMITS      = SUBARU_STEERING_LIMITS_GENERATOR(2047, 50, 70);
   const TorqueSteeringLimits SUBARU_GEN2_STEERING_LIMITS = SUBARU_STEERING_LIMITS_GENERATOR(1500, 35, 50);
@@ -158,6 +233,15 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
 
   bool tx = true;
   bool violation = false;
+
+  // BluePilot: angle steer command and request checks.
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_ES_LKAS_ANGLE)) {
+    int desired_angle = GET_BYTES(msg, 5, 3) & 0x1FFFFU;
+    desired_angle = -1 * to_signed(desired_angle, 17);
+    const bool lkas_request = GET_BIT(msg, 12U);
+    violation |= subaru_angle_cmd_checks(desired_angle, lkas_request);
+  }
+  // End BluePilot
 
   // steer cmd checks
   if (msg->addr == MSG_SUBARU_ES_LKAS) {
@@ -235,6 +319,19 @@ static safety_config subaru_init(uint16_t param) {
     SUBARU_GEN2_LONG_ADDITIONAL_TX_MSGS()
   };
 
+  // BluePilot: angle-LKAS keeps stock longitudinal control and only permits the
+  // normal cruise-cancel message on the appropriate main powertrain bus.
+  static const CanMsg SUBARU_LKAS_ANGLE_TX_MSGS[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
+    SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
+  };
+
+  static const CanMsg SUBARU_LKAS_ANGLE_GEN2_TX_MSGS[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
+    SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
+  };
+  // End BluePilot
+
   static const CanMsg subaru_stop_and_go_tx_msgs[] = {
     SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS)
     SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
@@ -249,9 +346,25 @@ static safety_config subaru_init(uint16_t param) {
     SUBARU_COMMON_RX_CHECKS(SUBARU_ALT_BUS)
   };
 
+  // BluePilot: separate Gen1/Gen2 angle RX topology.
+  static RxCheck subaru_lkas_angle_rx_checks[] = {
+    SUBARU_LKAS_ANGLE_RX_CHECKS(SUBARU_MAIN_BUS)
+  };
+
+  static RxCheck subaru_lkas_angle_gen2_rx_checks[] = {
+    SUBARU_LKAS_ANGLE_RX_CHECKS(SUBARU_ALT_BUS)
+  };
+  // End BluePilot
+
   const uint16_t SUBARU_PARAM_GEN2 = 1;
+  // BluePilot: angle-LKAS safety flag shared with CarInterface.
+  const uint16_t SUBARU_PARAM_LKAS_ANGLE = 8;
+  // End BluePilot
 
   subaru_gen2 = GET_FLAG(param, SUBARU_PARAM_GEN2);
+  // BluePilot: angle-LKAS safety selection.
+  subaru_lkas_angle = GET_FLAG(param, SUBARU_PARAM_LKAS_ANGLE);
+  // End BluePilot
 
   subaru_common_init();
 
@@ -261,7 +374,11 @@ static safety_config subaru_init(uint16_t param) {
 #endif
 
   safety_config ret;
-  if (subaru_gen2) {
+  // BluePilot: angle mode is stock-longitudinal and selected before torque modes.
+  if (subaru_lkas_angle) {
+    ret = subaru_gen2 ? BUILD_SAFETY_CFG(subaru_lkas_angle_gen2_rx_checks, SUBARU_LKAS_ANGLE_GEN2_TX_MSGS) : \
+                        BUILD_SAFETY_CFG(subaru_lkas_angle_rx_checks, SUBARU_LKAS_ANGLE_TX_MSGS);
+  } else if (subaru_gen2) {
     ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_LONG_TX_MSGS) : \
                                 BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_TX_MSGS);
   } else {
@@ -269,6 +386,7 @@ static safety_config subaru_init(uint16_t param) {
           subaru_stop_and_go  ? BUILD_SAFETY_CFG(subaru_rx_checks, subaru_stop_and_go_tx_msgs) : \
                                 BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
   }
+  // End BluePilot
   return ret;
 }
 

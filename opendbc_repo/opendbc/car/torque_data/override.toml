@@ -13,6 +13,9 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 # New subarus angle based controllers
 "SUBARU_FORESTER_2022" = [nan, 3.0, nan]
 "SUBARU_OUTBACK_2023" = [nan, 3.0, nan]
+# BluePilot: structurally required metadata for the distinct target platform.
+"SUBARU_OUTBACK_2025" = [nan, 3.0, nan]
+# End BluePilot
 "SUBARU_ASCENT_2023" = [nan, 3.0, nan]
 
 # Toyota LTA also has torque

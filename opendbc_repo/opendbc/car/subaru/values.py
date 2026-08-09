@@ -6,12 +6,27 @@ from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
 
+# BluePilot: dependencies for Jacob Waller's Subaru angle-LKAS safety envelope.
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
+from opendbc.car.lateral import AVERAGE_ROAD_ROLL, AngleSteeringLimitsVM, ISO_LATERAL_ACCEL
+# End BluePilot
+
 Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
+  # BluePilot: Jacob Waller's July angle-LKAS safety/fault envelope. These are
+  # hard compatibility limits, not vehicle-response tuning.
+  ANGLE_LIMITS: AngleSteeringLimitsVM = AngleSteeringLimitsVM(
+    STEER_ANGLE_MAX=190,  # deg; the EPS faults above approximately 200 deg
+    MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),
+    MAX_LATERAL_JERK=3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),
+    MAX_ANGLE_RATE=5,  # deg per 50 Hz command; low-speed EPS fault guard
+  )
+  STEER_STEP = 2
+  # End BluePilot
+
   def __init__(self, CP):
-    self.STEER_STEP = 2                # how often we update the steer cmd
     self.STEER_DELTA_UP = 50           # torque increase per refresh, 0.8s to max
     self.STEER_DELTA_DOWN = 70         # torque decrease per refresh
     self.STEER_DRIVER_ALLOWANCE = 60   # allowed driver torque before start limiting
@@ -56,6 +71,9 @@ class SubaruSafetyFlags(IntFlag):
   GEN2 = 1
   LONG = 2
   PREGLOBAL_REVERSED_DRIVER_TORQUE = 4
+  # BluePilot: enable Subaru angle-LKAS Panda safety.
+  LKAS_ANGLE = 8
+  # End BluePilot
 
 
 class SubaruFlags(IntFlag):
@@ -205,6 +223,13 @@ class CAR(Platforms):
     SUBARU_OUTBACK.specs,
     flags=SubaruFlags.LKAS_ANGLE,
   )
+  # BluePilot: keep the enabled 2025 Outback isolated from dormant angle platforms.
+  SUBARU_OUTBACK_2025 = SubaruGen2PlatformConfig(
+    [SubaruCarDocs("Subaru Outback 2025", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
+    SUBARU_OUTBACK.specs,
+    flags=SubaruFlags.LKAS_ANGLE,
+  )
+  # End BluePilot
   SUBARU_ASCENT_2023 = SubaruGen2PlatformConfig(
     [SubaruCarDocs("Subaru Ascent 2023", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
     SUBARU_ASCENT.specs,

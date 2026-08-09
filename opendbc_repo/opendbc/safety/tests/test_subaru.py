@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import enum
+# BluePilot: analytical VM-bound assertions for Subaru angle safety.
+import math
+# End BluePilot
 import unittest
 
 from opendbc.car.subaru.values import SubaruSafetyFlags
@@ -15,6 +18,9 @@ class SubaruMsg(enum.IntEnum):
   CruiseControl     = 0x240
   Throttle          = 0x40
   Steering_Torque   = 0x119
+  # BluePilot: measured angle input required by the angle safety hook.
+  Steering_2        = 0x11a
+  # End BluePilot
   Wheel_Speeds      = 0x13a
   ES_LKAS           = 0x122
   ES_LKAS_ANGLE     = 0x124
@@ -183,6 +189,126 @@ class TestSubaruTorqueSafetyBase(TestSubaruSafetyBase, common.DriverTorqueSteeri
     return self.packer.make_can_msg_safety("ES_LKAS", SUBARU_MAIN_BUS, values)
 
 
+# BluePilot: VM-based Subaru angle safety adapted from Jacob Waller's July
+# branch, with independent assertions for the declared hard bounds.
+class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafetyTest):
+  STEER_ANGLE_MAX = 190
+  DEG_TO_CAN = 100
+  LATERAL_FREQUENCY = 50
+
+  # Fixed Panda/VehicleModel constants used by the production safety hook.
+  SLIP_FACTOR = -0.000580374471400815
+  STEER_RATIO = 13.5
+  WHEELBASE = 2.89
+  MAX_LATERAL_ACCEL = 3.0 + (9.81 * 0.06)
+  MAX_LATERAL_JERK = 3.0 + (9.81 * 0.06)
+  MAX_ANGLE_DELTA_CAN = 5 * DEG_TO_CAN
+
+  cnt_angle_cmd = 0
+
+  def setUp(self):
+    self.__class__.cnt_angle_cmd = 0
+    super().setUp()
+
+  def _speed_msg(self, speed):
+    # Angle tests express speed in m/s; the Subaru DBC signal is kph.
+    values = {s: speed * 3.6 for s in ["FR", "FL", "RR", "RL"]}
+    return self.packer.make_can_msg_safety("Wheel_Speeds", self.ALT_MAIN_BUS, values)
+
+  def _angle_cmd_msg(self, angle, enabled, increment_timer=True):
+    values = {"LKAS_Output": angle, "LKAS_Request": enabled, "SET_3": 3}
+    if increment_timer:
+      self.safety.set_timer(self.cnt_angle_cmd * int(1e6 / self.LATERAL_FREQUENCY))
+      self.__class__.cnt_angle_cmd += 1
+    return self.packer.make_can_msg_safety("ES_LKAS_ANGLE", SUBARU_MAIN_BUS, values)
+
+  def _angle_meas_msg(self, angle):
+    return self.packer.make_can_msg_safety("Steering_2", SUBARU_MAIN_BUS, {"Steering_Angle": angle})
+
+  def _pcm_status_msg(self, enable):
+    return self.packer.make_can_msg_safety("ES_Status", self.ALT_MAIN_BUS, {"Cruise_Activated": enable})
+
+  def test_angle_cmd_when_enabled(self):
+    # The inherited test assumes breakpoint rate limits; VM boundaries are
+    # checked analytically below instead.
+    pass
+
+  def _prime_angle_test(self, speed, previous=0.0, measured=0.0):
+    self._reset_speed_measurement(speed + 1.0)  # Panda subtracts a 1 m/s speed tolerance.
+    self._reset_angle_measurement(measured)
+    self._set_prev_desired_angle(previous)
+    self.safety.set_controls_allowed(True)
+
+  def _vm_limit_can(self, speed, lateral_limit, per_second=False):
+    # Calculate the expected boundary independently from the C hook using the
+    # actual quantized speed accepted by Panda.
+    fudged_speed = max(self.safety.get_vehicle_speed_min() - 1.0, 1.0)
+    curvature_factor = 1.0 / (1.0 - (self.SLIP_FACTOR * fudged_speed ** 2)) / self.WHEELBASE
+    curvature = lateral_limit / fudged_speed ** 2
+    angle_deg = math.degrees(curvature * self.STEER_RATIO / curvature_factor)
+    if per_second:
+      angle_deg /= self.LATERAL_FREQUENCY
+    return int(angle_deg * self.DEG_TO_CAN + 1.0)
+
+  def test_absolute_angle_bound(self):
+    for sign in (-1, 1):
+      self._prime_angle_test(1.0, previous=sign * self.STEER_ANGLE_MAX, measured=sign * self.STEER_ANGLE_MAX)
+      self.assertTrue(self._tx(self._angle_cmd_msg(sign * 190.00, True)))
+
+      self._set_prev_desired_angle(sign * 190.01)
+      self.assertFalse(self._tx(self._angle_cmd_msg(sign * 190.01, True)))
+
+      self._reset_angle_measurement(sign * 190.00)
+      self.assertFalse(self._tx(self._angle_cmd_msg(sign * 190.01, False)))
+
+  def test_low_speed_per_message_bound(self):
+    for sign in (-1, 1):
+      self._prime_angle_test(1.0)
+      self.assertTrue(self._tx(self._angle_cmd_msg(sign * 5.00, True)))
+
+      self._set_prev_desired_angle(0)
+      self.assertFalse(self._tx(self._angle_cmd_msg(sign * 5.01, True)))
+
+  def test_vm_lateral_acceleration_bound(self):
+    for speed in (10.0, 20.0, 40.0):
+      for sign in (-1, 1):
+        self._prime_angle_test(speed)
+        max_angle_can = min(self._vm_limit_can(speed, self.MAX_LATERAL_ACCEL),
+                            self.STEER_ANGLE_MAX * self.DEG_TO_CAN)
+
+        self.safety.set_desired_angle_last(sign * max_angle_can)
+        self.assertTrue(self._tx(self._angle_cmd_msg(sign * max_angle_can / self.DEG_TO_CAN, True)))
+
+        self.safety.set_desired_angle_last(sign * (max_angle_can + 1))
+        self.assertFalse(self._tx(self._angle_cmd_msg(sign * (max_angle_can + 1) / self.DEG_TO_CAN, True)))
+
+  def test_vm_lateral_jerk_bound(self):
+    for speed in (10.0, 20.0, 40.0):
+      for sign in (-1, 1):
+        self._prime_angle_test(speed)
+        max_delta_can = min(self._vm_limit_can(speed, self.MAX_LATERAL_JERK, per_second=True),
+                            self.MAX_ANGLE_DELTA_CAN)
+
+        self.assertTrue(self._tx(self._angle_cmd_msg(sign * max_delta_can / self.DEG_TO_CAN, True)))
+        self.safety.set_desired_angle_last(0)
+        self.assertFalse(self._tx(self._angle_cmd_msg(sign * (max_delta_can + 1) / self.DEG_TO_CAN, True)))
+
+  def test_local_violation_resets_to_measured_angle(self):
+    self._prime_angle_test(1.0, measured=20.0)
+    self.assertFalse(self._tx(self._angle_cmd_msg(5.01, True)))
+    self.assertTrue(self._tx(self._angle_cmd_msg(20.0, True)))
+
+  def test_lateral_permission_matrix(self):
+    cases = ((True, False, True), (False, True, True), (False, False, False))
+    for controls_allowed, controls_allowed_lateral, should_tx in cases:
+      with self.subTest(controls_allowed=controls_allowed, controls_allowed_lateral=controls_allowed_lateral):
+        self._prime_angle_test(1.0)
+        self.safety.set_controls_allowed(controls_allowed)
+        self.safety.set_controls_allowed_lateral(controls_allowed_lateral)
+        self.assertEqual(should_tx, self._tx(self._angle_cmd_msg(1.0, True)))
+# End BluePilot
+
+
 class TestSubaruGen1TorqueStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruTorqueSafetyBase):
   FLAGS = 0
   TX_MSGS = lkas_tx_msgs(SUBARU_MAIN_BUS)
@@ -200,6 +326,58 @@ class TestSubaruGen2TorqueSafetyBase(TestSubaruTorqueSafetyBase):
 class TestSubaruGen2TorqueStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruGen2TorqueSafetyBase):
   FLAGS = SubaruSafetyFlags.GEN2
   TX_MSGS = lkas_tx_msgs(SUBARU_ALT_BUS)
+
+
+# BluePilot: exercise both safety topologies while only the distinct 2025
+# Outback candidate is enabled by CarInterface.
+class TestSubaruGen1AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):
+  FLAGS = SubaruSafetyFlags.LKAS_ANGLE
+  TX_MSGS = lkas_tx_msgs(SUBARU_MAIN_BUS, SubaruMsg.ES_LKAS_ANGLE)
+  RELAY_MALFUNCTION_ADDRS = {SUBARU_MAIN_BUS: (SubaruMsg.ES_LKAS_ANGLE, SubaruMsg.ES_DashStatus,
+                                               SubaruMsg.ES_LKAS_State, SubaruMsg.ES_Infotainment)}
+  FWD_BLACKLISTED_ADDRS = fwd_blacklisted_addr(SubaruMsg.ES_LKAS_ANGLE)
+
+
+class TestSubaruGen2AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):
+  ALT_MAIN_BUS = SUBARU_ALT_BUS
+  ALT_CAM_BUS = SUBARU_ALT_BUS
+  FLAGS = SubaruSafetyFlags.GEN2 | SubaruSafetyFlags.LKAS_ANGLE
+  TX_MSGS = lkas_tx_msgs(SUBARU_ALT_BUS, SubaruMsg.ES_LKAS_ANGLE)
+  RELAY_MALFUNCTION_ADDRS = {SUBARU_MAIN_BUS: (SubaruMsg.ES_LKAS_ANGLE, SubaruMsg.ES_DashStatus,
+                                               SubaruMsg.ES_LKAS_State, SubaruMsg.ES_Infotainment)}
+  FWD_BLACKLISTED_ADDRS = fwd_blacklisted_addr(SubaruMsg.ES_LKAS_ANGLE)
+
+  def test_controller_angle_commands_pass_panda_safety(self):
+    from types import SimpleNamespace
+
+    from opendbc.car import Bus, structs
+    from opendbc.car.subaru.carcontroller import CarController
+    from opendbc.car.subaru.interface import CarInterface
+    from opendbc.car.subaru.values import CAR, DBC
+
+    cp = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2025)
+    cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.SUBARU_OUTBACK_2025)
+    dbc_name = DBC[cp.carFingerprint][Bus.pt]
+
+    for speed in (1.0, 10.0, 20.0, 40.0):
+      with self.subTest(speed=speed):
+        controller = CarController({Bus.pt: dbc_name}, cp, cp_sp)
+        controller.frame = controller.p.STEER_STEP
+
+        cc = structs.CarControl()
+        cc.enabled = True
+        cc.latActive = True
+        cc.actuators.steeringAngleDeg = 100.0
+        cs = SimpleNamespace(out=structs.CarState(vEgoRaw=speed, steeringAngleDeg=0.0))
+
+        self._prime_angle_test(speed)
+        _, can_sends = controller.update(cc.as_reader(), structs.CarControlSP(), cs, 0)
+        angle_msgs = [msg for msg in can_sends if msg[0] == SubaruMsg.ES_LKAS_ANGLE]
+        self.assertEqual(len(angle_msgs), 1)
+
+        addr, dat, bus = angle_msgs[0]
+        self.assertTrue(self._tx(libsafety_py.make_CANPacket(addr, bus, dat)))
+# End BluePilot
 
 
 class TestSubaruGen1LongitudinalSafety(TestSubaruLongitudinalSafetyBase, TestSubaruTorqueSafetyBase):

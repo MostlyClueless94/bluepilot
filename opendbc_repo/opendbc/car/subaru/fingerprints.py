@@ -586,4 +586,18 @@ FW_VERSIONS = {
       b'\xa8\xfe\xf41\x00',
     ],
   },
+  # BluePilot: firmware captured from the target 2025 Outback. Keep this a
+  # distinct candidate so older, unvalidated angle Outbacks remain dashcam-only.
+  CAR.SUBARU_OUTBACK_2025: {
+    (Ecu.abs, 0x7b0, None): [
+      b'\xa1 $\x15\x00',
+    ],
+    (Ecu.fwdCamera, 0x787, None): [
+      b'\x1a!\x08\x00C\x00\x00\x00\x00\x00',
+    ],
+    (Ecu.engine, 0x7a2, None): [
+      b'\x08"`@\x07',
+    ],
+  },
+  # End BluePilot
 }
