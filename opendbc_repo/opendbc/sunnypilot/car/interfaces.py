@@ -136,6 +136,11 @@ def _initialize_stop_and_go(CP: structs.CarParams, CP_SP: structs.CarParamsSP, p
 
 
 def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_dict: dict[str, str]) -> None:
+  # BluePilot: snapshot overlap opt-in in CarParams so software and firmware agree.
+  from opendbc.sunnypilot.car.ford.concurrent_accel_bp import PARAM_BP, configure_concurrent_accel_bp
+  configure_concurrent_accel_bp(CP, int(params_dict.get(PARAM_BP, 0) or 0) == 1,
+                               int(params_dict.get("DisengageOnAccelerator", 0) or 0) == 1)
+  # End BluePilot
   # BluePilot: steering-angle curvature measurement (bad-yaw-sensor workaround). Sets the
   # STEER_ANGLE_CURVATURE flag + the platform geometry-table index on CP_SP.safetyParam,
   # which reaches the safety firmware as current_safety_param_sp (USB 0xdf); the control

@@ -99,6 +99,7 @@ class BluePilotLayout(Widget):
       ("custom_profile_curv", self._custom_profile),
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
+      ("BPExperimentalConcurrentAccel", self._concurrent_accel),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BpShowLateralControl", self._show_lateral_control),
@@ -575,6 +576,17 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # BluePilot: default-off research setting; only adjustable offroad.
+    self._concurrent_accel = toggle_item(
+      lambda: tr("Concurrent Acceleration Prototype"),
+      lambda: tr("Unverified F-150 gas/cruise overlap in Experimental Mode. Restart required; Disengage on Accelerator must be off."),
+      initial_state=self._safe_get_bool(self._params, "BPExperimentalConcurrentAccel"),
+      callback=lambda state: self._toggle_callback(state, "BPExperimentalConcurrentAccel"),
+      icon="chffr_wheel.png"
+    )
+    self._concurrent_accel.action_item.set_enabled(lambda: not ui_state.started)
+    # End BluePilot
+
     # Disable downhill compensation toggle
     self._disable_dowhill_comp = toggle_item(
       lambda: tr("Disable Downhill Compensation"),
@@ -718,6 +730,7 @@ class BluePilotLayout(Widget):
       ]) +
       _section(tr("Longitudinal Tuning"), [
         self._disable_BP_long,
+        self._concurrent_accel,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
       ]) +

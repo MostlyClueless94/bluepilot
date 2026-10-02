@@ -46,6 +46,9 @@ class CarControllerParams:
 class FordSafetyFlags(IntFlag):
   LONG_CONTROL = 1
   CANFD = 2
+  # BluePilot: default-off, bounded positive propulsion during driver gas input.
+  CONCURRENT_ACCEL_BP = 4
+  # End BluePilot
 
 
 class FordFlags(IntFlag):

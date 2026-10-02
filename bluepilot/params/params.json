@@ -27,6 +27,15 @@
       "enabled": true
     },
     {
+      "name": "BPExperimentalConcurrentAccel",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "description": "Default-off F-150 concurrent acceleration research prototype; requires restart.",
+      "create_default": true,
+      "enabled": true
+    },
+    {
       "name": "FordPrefSteerAngleCurvature",
       "default": false,
       "type": "bool",

@@ -15,6 +15,11 @@ from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
+# BluePilot: constrain the final overlap output, including extension tuning.
+from opendbc.sunnypilot.car.ford.concurrent_accel_bp import (
+  concurrent_accel_configured_bp, concurrent_accel_enabled_bp, constrain_concurrent_accel_bp,
+)
+# End BluePilot
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -262,6 +267,18 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # rate-limited braking, and split brake/precharge hysteresis.
       lng = LongitudinalExt.update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch,
                                     v_ego_mph, stopping, target_speed)
+
+      # BluePilot: firmware permits overlap only for explicitly configured CAN-FD long.
+      if concurrent_accel_configured_bp(self.CP):
+        overlap_active = (CC.longActive and concurrent_accel_enabled_bp(self.CP, self.sm['selfdriveState'].experimentalMode) and
+                          not CS.out.brakePressed and not CC.cruiseControl.cancel)
+        # Keep ordinary control unchanged outside Experimental Mode, but always
+        # neutralize gas-overlap frames if the two process snapshots disagree.
+        if self.sm['selfdriveState'].experimentalMode or CS.out.gasPressed:
+          lng = constrain_concurrent_accel_bp(lng, CS.out.gasPressed, overlap_active, self.gas)
+          if CS.out.gasPressed:
+            self.op_brake_actuate_last = False
+      # End BluePilot
 
       can_sends.append(fordcan_ext.create_acc_msg(
         self.packer, self.CAN, CC.longActive, lng.gas, lng.accel, lng.accel_pred_send,

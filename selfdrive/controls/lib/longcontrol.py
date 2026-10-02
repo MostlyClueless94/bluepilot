@@ -60,7 +60,9 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits):
+  # BluePilot: optional overlap argument defaults to upstream behavior.
+  def update(self, active, CS, a_target, should_stop, accel_limits, concurrent_accel=False):
+    # End BluePilot
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -85,8 +87,13 @@ class LongControl:
 
     else:  # LongCtrlState.pid
       error = a_target - CS.aEgo
-      output_accel = self.pid.update(error, speed=CS.vEgo,
-                                     feedforward=a_target)
+      # BluePilot: driver acceleration must not wind the cruise integrator down.
+      output_accel = self.pid.update(error, speed=CS.vEgo, feedforward=a_target,
+                                    freeze_integrator=concurrent_accel and CS.gasPressed)
+      if concurrent_accel and CS.gasPressed and a_target <= 0.:
+        # A stored positive correction must not override a planner deceleration.
+        output_accel = min(output_accel, 0.)
+      # End BluePilot
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

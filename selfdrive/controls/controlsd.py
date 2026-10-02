@@ -22,6 +22,10 @@ from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
 
+# BluePilot: default-off Ford concurrent acceleration prototype.
+from opendbc.sunnypilot.car.ford.concurrent_accel_bp import concurrent_accel_enabled_bp, longitudinal_override_bp
+# End BluePilot
+
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -113,8 +117,11 @@ class Controls(ControlsExt):
 
     CC.latActive = _lat_active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.CP.steerAtStandstill)
-    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and \
+    # BluePilot: retain only the gas request alongside Experimental Mode control.
+    concurrent_accel = concurrent_accel_enabled_bp(self.CP, self.sm['selfdriveState'].experimentalMode)
+    CC.longActive = CC.enabled and not longitudinal_override_bp(self.sm['onroadEvents'], concurrent_accel) and \
                     (self.CP.openpilotLongitudinalControl or not self.CP_SP.pcmCruiseSpeed)
+    # End BluePilot
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -131,7 +138,10 @@ class Controls(ControlsExt):
 
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, self.CP_SP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
-    actuators.accel = float(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits))
+    # BluePilot: avoid integral wind-down from acceleration provided by the driver.
+    actuators.accel = float(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
+                                          concurrent_accel=concurrent_accel))
+    # End BluePilot
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage

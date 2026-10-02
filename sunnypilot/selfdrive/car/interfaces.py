@@ -112,6 +112,10 @@ def initialize_params(params) -> list[dict[str, Any]]:
   # ford
   keys.extend([
     "FordPrefSteerAngleCurvature",
+    # BluePilot: read overlap opt-in and preserve the user's gas-disengage setting.
+    "BPExperimentalConcurrentAccel",
+    "DisengageOnAccelerator",
+    # End BluePilot
   ])
 
   # hyundai
