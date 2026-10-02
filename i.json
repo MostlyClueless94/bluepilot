@@ -1,0 +1,14 @@
+{
+  "device": "comma 3X (tici)",
+  "source_url": "https://installer.comma.ai/MostlyClueless94/codex/experimental-resume-study",
+  "repository_url": "https://github.com/MostlyClueless94/bluepilot.git",
+  "branch": "codex/experimental-resume-study",
+  "source_sha256": "93f8fb74399f213d2bb95a764b87c175cd1212471df793feb3e1193ddec6f0b1",
+  "installer_sha256": "9af115e687bd3fae4820b234aea8b2a5b75429a13cea9369f556bd4e7786755a",
+  "bytes": 2051392,
+  "modified_slot": {
+    "offset": 830740,
+    "length": 105
+  },
+  "agnos_version": "18.5"
+}
