@@ -588,7 +588,8 @@ class BluePilotLayout(Widget):
     self._concurrent_accel.action_item.set_enabled(lambda: not ui_state.started)
     self._follow_vehicle_limits = toggle_item(
       lambda: tr("Follow Vehicle Speed Limits"),
-      lambda: tr("F-150: set cruise to the detected limit to follow Ford camera signs, including while cruise is paused. Manual +/- pauses following. Changes the comma target; Ford's dashboard may differ. Restart required."),
+      lambda: tr("F-150: set cruise to the detected limit to follow Ford camera signs, including while cruise is paused. "
+                 "Manual +/- pauses following. Changes the comma target; Ford's dashboard may differ. Restart required."),
       initial_state=self._safe_get_bool(self._params, "BPFollowVehicleSpeedLimits"),
       callback=lambda state: self._toggle_callback(state, "BPFollowVehicleSpeedLimits"),
       icon="chffr_wheel.png"
