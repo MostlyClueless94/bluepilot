@@ -265,6 +265,10 @@ static const AngleSteeringParams ford_pinion_geometry[FORD_PINION_GEOMETRY_COUNT
 static bool ford_bp_pinion_curvature = false;
 static const AngleSteeringParams *ford_bp_pinion_params = &ford_pinion_geometry[0];
 
+// BluePilot: default-off capability, confined to CAN-FD longitudinal in ford_init.
+static bool ford_bp_concurrent_accel = false;
+// End BluePilot
+
 
 
 static int desired_path_angle_last = 0;
@@ -526,9 +530,22 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     bool brake_actuation = ((msg->data[6] >> 6) & 1U) || ((msg->data[6] >> 7) & 1U);
 
     bool violation = false;
-    violation |= longitudinal_accel_checks(accel, FORD_LONG_LIMITS);
-    violation |= longitudinal_gas_checks(gas, FORD_LONG_LIMITS);
-    violation |= longitudinal_gas_checks(gas_pred, FORD_LONG_LIMITS);
+    // BluePilot: narrowly bounded positive cruise propulsion alongside the pedal.
+    // Never change get_longitudinal_allowed(): all other modes keep gas override.
+    if (ford_bp_concurrent_accel && gas_pressed_prev) {
+      const int FORD_ZERO_GAS = 500;  // 0.0 m/s^2
+      const bool positive_gas = (gas >= FORD_ZERO_GAS) && (gas <= FORD_LONG_LIMITS.max_gas);
+      violation |= (gas != FORD_LONG_LIMITS.inactive_gas) && !(controls_allowed && positive_gas);
+      violation |= accel != FORD_LONG_LIMITS.inactive_accel;
+      violation |= gas_pred != FORD_LONG_LIMITS.inactive_gas;
+      // No stop/park brake, driver override or engine torque-minimum requests.
+      violation |= ((msg->data[4] & 0x44U) != 0U) || ((msg->data[6] & 0x18U) != 0U);
+    } else {
+      violation |= longitudinal_accel_checks(accel, FORD_LONG_LIMITS);
+      violation |= longitudinal_gas_checks(gas, FORD_LONG_LIMITS);
+      violation |= longitudinal_gas_checks(gas_pred, FORD_LONG_LIMITS);
+    }
+    // End BluePilot
 
     // Safety check for stock AEB
     violation |= cmbb_deny; // do not prevent stock AEB actuation
@@ -932,10 +949,17 @@ static safety_config ford_init(uint16_t param) {
   const bool ford_canfd = GET_FLAG(param, FORD_PARAM_CANFD);
 
   bool ford_longitudinal = false;
+  // BluePilot: always reset on safety mode reinitialization, including release builds.
+  ford_bp_concurrent_accel = false;
+  // End BluePilot
 
 #ifdef ALLOW_DEBUG
   const uint16_t FORD_PARAM_LONGITUDINAL = 1;
   ford_longitudinal = GET_FLAG(param, FORD_PARAM_LONGITUDINAL);
+  // BluePilot: the opt-in cannot enable longitudinal or change CAN-only vehicles.
+  const uint16_t FORD_PARAM_CONCURRENT_ACCEL_BP = 4;
+  ford_bp_concurrent_accel = ford_longitudinal && ford_canfd && GET_FLAG(param, FORD_PARAM_CONCURRENT_ACCEL_BP);
+  // End BluePilot
 #endif
 
   // Longitudinal is the default for CAN, and optional for CAN FD w/ ALLOW_DEBUG

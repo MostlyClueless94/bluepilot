@@ -27,6 +27,9 @@ from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfac
 from openpilot.common.bluepilot import is_bluepilot
 if is_bluepilot():
   from openpilot.bluepilot.selfdrive.car.bp_card_publisher import publish_controller_state_bp, publish_car_state_bp
+  # BluePilot: default-off vehicle sign following extends the stock cruise helper.
+  from openpilot.bluepilot.selfdrive.car.vehicle_speed_limit_cruise_bp import VCruiseHelperBP as VCruiseHelper
+  # End BluePilot
 
 REPLAY = "REPLAY" in os.environ
 
@@ -217,6 +220,10 @@ class Car:
     if can_rcv_valid and REPLAY:
       self.can_log_mono_time = messaging.log_from_bytes(can_strs[0]).logMonoTime
 
+    # BluePilot: use the current Ford camera sign, independently of map data/SLA.
+    if is_bluepilot():
+      self.v_cruise_helper.update_vehicle_speed_limit_bp(CS_SP.speedLimit)
+    # End BluePilot
     self.v_cruise_helper.update_speed_limit_assist(self.is_metric, self.sm['longitudinalPlanSP'])
     self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric)
     if self.sm['carControl'].enabled and not self.CC_prev.enabled:
