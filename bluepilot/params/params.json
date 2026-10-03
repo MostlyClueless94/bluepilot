@@ -27,6 +27,15 @@
       "enabled": true
     },
     {
+      "name": "BPFollowVehicleSpeedLimits",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "description": "Follow Ford camera speed limits after setting cruise to the limit; restart required.",
+      "create_default": true,
+      "enabled": true
+    },
+    {
       "name": "BPExperimentalConcurrentAccel",
       "default": false,
       "type": "bool",

@@ -100,6 +100,7 @@ class BluePilotLayout(Widget):
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
       ("BPExperimentalConcurrentAccel", self._concurrent_accel),
+      ("BPFollowVehicleSpeedLimits", self._follow_vehicle_limits),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BpShowLateralControl", self._show_lateral_control),
@@ -585,6 +586,14 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
     self._concurrent_accel.action_item.set_enabled(lambda: not ui_state.started)
+    self._follow_vehicle_limits = toggle_item(
+      lambda: tr("Follow Vehicle Speed Limits"),
+      lambda: tr("F-150: set cruise to the detected limit to follow Ford camera signs, including while cruise is paused. Manual +/- pauses following. Changes the comma target; Ford's dashboard may differ. Restart required."),
+      initial_state=self._safe_get_bool(self._params, "BPFollowVehicleSpeedLimits"),
+      callback=lambda state: self._toggle_callback(state, "BPFollowVehicleSpeedLimits"),
+      icon="chffr_wheel.png"
+    )
+    self._follow_vehicle_limits.action_item.set_enabled(lambda: not ui_state.started)
     # End BluePilot
 
     # Disable downhill compensation toggle
@@ -731,6 +740,7 @@ class BluePilotLayout(Widget):
       _section(tr("Longitudinal Tuning"), [
         self._disable_BP_long,
         self._concurrent_accel,
+        self._follow_vehicle_limits,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
       ]) +

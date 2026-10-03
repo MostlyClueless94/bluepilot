@@ -30,9 +30,11 @@ def main():
     params.Params = UnavailableParamsBP
     sys.modules[params.__name__] = params
     messaging = types.ModuleType("cereal.messaging")
+    messaging.SubMaster = UnavailableParamsBP  # annotations only; never instantiate device services
     sys.modules[messaging.__name__] = messaging
     hardware = types.ModuleType("openpilot.system.hardware")
     hardware.PC = True
+    hardware.HARDWARE = types.SimpleNamespace(get_device_type=lambda: "pc")
     sys.modules[hardware.__name__] = hardware
 
   loader = unittest.TestLoader()
@@ -51,7 +53,8 @@ def main():
   # One-shot process: explicit test path, no application conftest or cache writes.
   software_status = pytest.main(["-c", "/dev/null", "--rootdir", str(ROOT_BP), "--confcutdir", str(ROOT_BP / "bluepilot"),  # noqa: TID251
                                  "-p", "no:cacheprovider", "-q",
-                                 str(ROOT_BP / "bluepilot/selfdrive/controls/tests/test_concurrent_accel_bp.py")])
+                                 str(ROOT_BP / "bluepilot/selfdrive/controls/tests/test_concurrent_accel_bp.py"),
+                                 str(ROOT_BP / "bluepilot/selfdrive/car/tests/test_vehicle_speed_limit_cruise_bp.py")])
   return int(not result.wasSuccessful() or software_status != 0)
 
 

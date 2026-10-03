@@ -316,6 +316,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     // BluePilot: default-off research prototype; snapshot at car init/restart.
     {"BPExperimentalConcurrentAccel", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"BPFollowVehicleSpeedLimits", {PERSISTENT | BACKUP, BOOL, "0"}},
     // End BluePilot
     {"disable_downhill_comp_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_ford_radar_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
