@@ -259,6 +259,9 @@ def test_metric_manual_increment_uses_pcm_delta_after_limit_following():
   drive(state, stock_kph=100.0, ego_kph=60.0, limit_kph=60.0, buttons=[("accelCruise", False)])
   assert drive(state, stock_kph=101.0, ego_kph=60.0, limit_kph=60.0) == pytest.approx(61.0)
   assert not state.following
+  assert drive(state, BUTTON_FEEDBACK_FRAMES_BP + 1, stock_kph=101.0,
+               ego_kph=60.0, limit_kph=60.0) == pytest.approx(61.0)
+  assert not state.following
 
 
 def test_main_off_clears_saved_session():

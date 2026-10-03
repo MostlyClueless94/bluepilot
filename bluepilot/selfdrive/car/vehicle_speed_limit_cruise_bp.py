@@ -10,7 +10,7 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_MIN, V_CRUISE
 from opendbc.car.ford.values import CAR
 
 PARAM_BP = "BPFollowVehicleSpeedLimits"
-MATCH_TOLERANCE_KPH_BP = 1.0
+MATCH_TOLERANCE_KPH_BP = 0.5  # rounding tolerance must be smaller than a manual 1 km/h step
 LIMIT_SETTLE_FRAMES_BP = 100  # card runs at 100 Hz; require a stable sign for one second
 BUTTON_FEEDBACK_FRAMES_BP = 100
 SET_ADJUST_FEEDBACK_WINDOW_KPH_BP = 2.5  # SET rounding plus a single short +/- selection

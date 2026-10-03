@@ -24,7 +24,7 @@ normal driving; those modes run test commands rather than the ordinary planner.
 
 Set cruise to a camera-recognized limit to start following it. First Resume may
 also select a saved speed that already matches the limit. A valid limit must
-remain stable for one second before acceptance. Matching permits 1 km/h of
+remain stable for one second before acceptance. Matching permits 0.5 km/h of
 rounding difference. Passive matching alone does not arm following.
 
 Cancel and braking preserve the saved target and following state. While paused,
